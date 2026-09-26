@@ -1,36 +1,64 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Crystal Ball Command Centre — Approvals Assistant
 
-## Getting Started
+Wave 2 take-home: an Approvals assistant panel (UI → Express API → Claude → tests) matching the OomniEye-style workflow widget.
 
-First, run the development server:
+## Stack
+
+| Layer | Choice |
+|--------|--------|
+| Frontend | React 19 + Next.js 15 (App Router), Zustand |
+| Backend | **Express + TypeScript** (Next.js rewrites `/api/*` → API). Lightweight substitute for a separate MERN API host — same handlers are exercised by Supertest. |
+| LLM | Anthropic Claude (server-side only) |
+| Validation | Zod schemas (`src/schemas/*`) + hand-written OpenAPI contract |
+| RAG | In-memory keyword retrieval over 5 policy chunks (`src/lib/rag.ts`) |
+| Tests | Jest unit + Supertest integration + Vitest/Testing Library component |
+
+## Setup
 
 ```bash
+cp .env.example .env.local
+# set ANTHROPIC_API_KEY=sk-ant-...
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- Web: http://localhost:3000  
+- API: http://localhost:4000  
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Without an API key, every AI action still works via **deterministic fallbacks** (urgency-sorted queue / policy retrieval hints) so the UI never freezes.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm test
+```
 
-## Learn More
+## Five actions
 
-To learn more about Next.js, take a look at the following resources:
+1. **Present me Summary** — structured JSON summary (Zod-validated), prioritised by urgency  
+2. **Talk to me** — multi-turn SSE chat about the seeded queue  
+3. **Help me** — policy-grounded RAG answer with citations  
+4. **Teach me** — adaptive walkthrough (follow-ups supported)  
+5. **Replay Greeting** — regenerated context-aware greeting (not a fixed string)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Prompts live in versioned exports under `src/prompts/*.ts`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## AI judgment (README requirement)
 
-## Deploy on Vercel
+**AI-necessary:** Summary wording & prioritisation rationale, free-form Talk/Teach dialogue, Help answers that synthesise policy chunks into operator language, and Replay Greeting (must vary with live queue context). These need judgment, paraphrase, and multi-turn adaptation that templates alone handle poorly.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+**AI-unnecessary (and fallback when LLM fails):** Sorting the queue by urgency/time, counting pending items, retrieving policy chunks by keyword overlap, and emitting the five static teach steps. Those are deterministic; the UI can stay useful without a model.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+**Fallback design:** Every LLM call has an **8s timeout**. Timeouts, missing keys, empty/invalid model output, or Zod parse failures return `source: "fallback"` payloads (never a raw 500 / frozen spinner). Streaming endpoints still emit tokens from the fallback text so the panel keeps moving. Rate limiting: `express-rate-limit` per IP plus a per-`x-session-id` in-memory throttle (20/min) on `/api/ai/*`.
+
+**With more time:** real embeddings + pgvector for Help me, persisted conversation sessions, and OpenAPI-generated client types from the Zod schemas.
+
+## Project map
+
+```
+src/data/          approvals fixture + policy note/chunks
+src/prompts/       versioned prompt modules
+src/schemas/       Zod + OpenAPI contract
+src/lib/handlers/  AI decision layer (mocked in unit tests)
+src/server/        Express app (Supertest target)
+src/components/    Approvals assistant panel
+tests/             unit / integration / component
+```
